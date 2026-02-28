@@ -11,6 +11,7 @@ from .bip32 import VERSIONS, ExtendedKey
 from .bip32 import derive_key as derive_key_bip32
 from .bip32 import hmac_sha512
 from .bip39 import LANGUAGES, N_WORDS_META, entropy_to_words, validate_mnemonic_words
+from .gpg import VALID_KEY_BITS, VALID_KEY_TYPES, derive_gpg_key
 from .util import LOGGER_NAME, to_hex_string
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -21,6 +22,7 @@ APPLICATIONS = {
     "base85": "707785'",
     "dice": "89101'",
     "drng": "0'",
+    "gpg": "828365'",
     "hex": "128169'",
     "mnemonic": "39'",
     "wif": "2'",
@@ -136,6 +138,33 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
         return {
             "entropy": entropy,
             "application": do_rolls(entropy, sides, rolls, index),
+        }
+    elif app == APPLICATIONS["gpg"]:
+        key_type = int(indexes[0].rstrip("'"))
+        key_bits = int(indexes[1].rstrip("'"))
+        # sub_key is present when len(indexes) >= 4 (path has 7 segments)
+        sub_key = int(indexes[3].rstrip("'")) if len(indexes) >= 4 else None
+
+        from .gpg import DRNG_REQUIRED_ECC, KEY_TYPE_RSA
+
+        use_drng = (
+            key_type == KEY_TYPE_RSA
+            or (key_type, key_bits) in DRNG_REQUIRED_ECC
+        )
+        drng_read = DRNG(entropy).read if use_drng else None
+
+        result = derive_gpg_key(
+            entropy=entropy,
+            key_type=key_type,
+            key_bits=key_bits,
+            drng_read=drng_read,
+            sub_key=sub_key,
+        )
+
+        return {
+            "entropy": entropy,
+            "application": to_hex_string(result["private_key"]),
+            "gpg": result,
         }
     else:
         raise NotImplementedError(f"Unsupported BIP-85 application {app}")

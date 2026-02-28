@@ -205,7 +205,20 @@ def xprv(mnemonic, passphrase, mainnet):
     type=click.Choice(ENTROPY_TO_VALUES),
     help="Output language for `--application mnemonic`.",
 )
-def derive_cli(application, number, index, special, xprv, to):
+@click.option(
+    "--key-type",
+    "key_type",
+    type=click.IntRange(0, 4),
+    default=None,
+    help="GPG key type: 0=RSA, 1=Curve25519, 2=secp256k1, 3=NIST, 4=Brainpool.",
+)
+@click.option(
+    "--subkey",
+    type=click.IntRange(0, 2),
+    default=None,
+    help="GPG sub-key role: 0=encrypt, 1=auth, 2=sign.",
+)
+def derive_cli(application, number, index, special, xprv, to, key_type, subkey):
     if xprv:
         xprv = xprv.strip()
     else:
@@ -222,7 +235,10 @@ def derive_cli(application, number, index, special, xprv, to):
                 message="`--number` has no effect when `--application wif|xprv`",
             )
     else:
-        number = 24
+        if application == "gpg":
+            number = 256
+        else:
+            number = 24
 
     master = parse_ext_key(xprv)
 
@@ -239,7 +255,16 @@ def derive_cli(application, number, index, special, xprv, to):
     else:
         to = "eng"
 
-    if application == "mnemonic":
+    if application == "gpg":
+        if key_type is None:
+            raise click.BadOptionUsage(
+                option_name="--key-type",
+                message="--key-type is required for `--application gpg`",
+            )
+        path += f"/{key_type}'/{number}'/{index}'"
+        if subkey is not None:
+            path += f"/{subkey}'"
+    elif application == "mnemonic":
         language = ISO_TO_LANGUAGE[to]
         code_85 = next(i for i, l in INDEX_TO_LANGUAGE.items() if l == language)
         path += f"/{code_85}/{number}'/{index}'"
