@@ -27,6 +27,13 @@ from .bip85 import (
     derive,
     to_entropy,
 )
+from .gpg import (
+    GPG_KEY_TYPES,
+    GPG_VALID_KEY_BITS,
+    build_gpg_key,
+    generate_gpg_key_material,
+    validate_gpg_params,
+)
 from .util import (
     LOGGER_NAME,
     MIN_REL_ENTROPY,
@@ -205,7 +212,18 @@ def xprv(mnemonic, passphrase, mainnet):
     type=click.Choice(ENTROPY_TO_VALUES),
     help="Output language for `--application mnemonic`.",
 )
-def derive_cli(application, number, index, special, xprv, to):
+@click.option(
+    "--key-type",
+    type=click.IntRange(0, 4),
+    default=None,
+    help="GPG key type: 0=RSA, 1=Curve25519, 2=secp256k1, 3=NIST, 4=Brainpool.",
+)
+@click.option(
+    "--uid",
+    default="BIP85 Generated Key",
+    help="User ID for `--application gpg`.",
+)
+def derive_cli(application, number, index, special, xprv, to, key_type, uid):
     if xprv:
         xprv = xprv.strip()
     else:
@@ -222,9 +240,24 @@ def derive_cli(application, number, index, special, xprv, to):
                 message="`--number` has no effect when `--application wif|xprv`",
             )
     else:
-        number = 24
+        if application == "gpg":
+            number = 256
+        else:
+            number = 24
 
     master = parse_ext_key(xprv)
+
+    if application == "gpg":
+        if key_type is None:
+            raise click.BadOptionUsage(
+                option_name="--key-type",
+                message="--key-type is required for `--application gpg`",
+            )
+        key_bits = number
+        validate_gpg_params(key_type, key_bits)
+        output = _derive_gpg(master, key_type, key_bits, index, uid)
+        click.echo(output)
+        return
 
     path = f"m/{PURPOSE_CODES['BIP-85']}"
     app_code = APPLICATIONS[application]
@@ -261,6 +294,41 @@ def derive_cli(application, number, index, special, xprv, to):
     else:
         output = apply_85(derived, path)["application"]
     click.echo(output)
+
+
+def _derive_gpg(master, key_type, key_bits, key_index, uid):
+    """Derive a full GPG key with subkeys using BIP85."""
+    from .gpg import _needs_drng, FLAG_AUTHENTICATE, FLAG_ENCRYPT_COMMS, FLAG_ENCRYPT_STORAGE, FLAG_SIGN
+
+    app_code = APPLICATIONS["gpg"]
+    base_path = f"m/{PURPOSE_CODES['BIP-85']}/{app_code}/{key_type}'/{key_bits}'/{key_index}'"
+
+    # Primary key (certify)
+    primary_derived = derive(master, base_path)
+    primary_entropy = to_entropy(primary_derived.data[1:])
+    primary_randfunc = DRNG(primary_entropy).read if _needs_drng(key_type, key_bits) else None
+    primary_material = generate_gpg_key_material(
+        primary_entropy, key_type, key_bits, "certify", primary_randfunc
+    )
+
+    # Subkeys: 0'=encrypt, 1'=authenticate, 2'=sign
+    sub_configs = [
+        (0, "encrypt", FLAG_ENCRYPT_COMMS | FLAG_ENCRYPT_STORAGE),
+        (1, "authenticate", FLAG_AUTHENTICATE),
+        (2, "sign", FLAG_SIGN),
+    ]
+    sub_materials = []
+    for sub_idx, capability, flags in sub_configs:
+        sub_path = f"{base_path}/{sub_idx}'"
+        sub_derived = derive(master, sub_path)
+        sub_entropy = to_entropy(sub_derived.data[1:])
+        sub_randfunc = DRNG(sub_entropy).read if _needs_drng(key_type, key_bits) else None
+        mat = generate_gpg_key_material(
+            sub_entropy, key_type, key_bits, capability, sub_randfunc
+        )
+        sub_materials.append((mat, flags))
+
+    return build_gpg_key(primary_material, sub_materials, uid, key_type, key_bits)
 
 
 @click.group()
