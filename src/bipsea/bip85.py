@@ -149,9 +149,11 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
     elif app == APPLICATIONS["gpg"]:
         if len(indexes) < 3:
             raise ValueError(
-                f"Expected path m/.../828365'/key_type'/key_bits'/index': {path}"
+                f"Expected key_type', key_bits', and index' after 828365': {path}"
             )
-        key_type, key_bits, _ = (int(s.rstrip("'")) for s in indexes[:3])
+        key_type, key_bits, index = (int(s.rstrip("'")) for s in indexes[:3])
+        if index < 0:
+            raise ValueError(f"Unsupported GPG key index: {index}")
         if key_type not in GPG_KEY_TYPE_TO_BITS:
             raise ValueError(f"Unsupported GPG key_type: {key_type}")
         if key_bits not in GPG_KEY_TYPE_TO_BITS[key_type]:
