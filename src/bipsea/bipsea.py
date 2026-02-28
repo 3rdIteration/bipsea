@@ -241,7 +241,7 @@ def derive_cli(application, number, index, special, xprv, to, key_type, uid):
             )
     else:
         if application == "gpg":
-            number = 256
+            number = 256  # default key_bits for ECC curves
         else:
             number = 24
 

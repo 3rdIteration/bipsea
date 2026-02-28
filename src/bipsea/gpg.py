@@ -177,7 +177,11 @@ def x25519_public_key(private_key_bytes: bytes) -> bytes:
 
 
 def _is_probable_prime(n: int, randfunc: Callable, rounds: int = 28) -> bool:
-    """Miller-Rabin primality test using deterministic witnesses from randfunc."""
+    """Miller-Rabin primality test using deterministic witnesses from randfunc.
+
+    The default of 28 rounds gives a false positive probability of at most
+    4^(-28) ≈ 1.4e-17, which is negligible for cryptographic key generation.
+    """
     if n < 2:
         return False
     if n == 2 or n == 3:
@@ -559,7 +563,10 @@ def _generate_ecdsa_material(
     # Ensure scalar is in valid range for the curve
     scalar_int = int.from_bytes(secret_bytes, "big") % curve.order
     if scalar_int == 0:
-        scalar_int = 1
+        raise ValueError(
+            "Derived ECC scalar is zero (probability < 1/2^127). "
+            "Retry with the next key index."
+        )
     secret_bytes = scalar_int.to_bytes(scalar_len, "big")
 
     sk = SigningKey.from_string(secret_bytes, curve=curve)
@@ -602,7 +609,10 @@ def _generate_ecdh_material(
 
     scalar_int = int.from_bytes(secret_bytes, "big") % curve.order
     if scalar_int == 0:
-        scalar_int = 1
+        raise ValueError(
+            "Derived ECC scalar is zero (probability < 1/2^127). "
+            "Retry with the next key index."
+        )
     secret_bytes = scalar_int.to_bytes(scalar_len, "big")
 
     sk = SigningKey.from_string(secret_bytes, curve=curve)
