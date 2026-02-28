@@ -19,8 +19,9 @@ from data.bip85_vectors import (
     WIF,
 )
 
-from bipsea.bip32types import validate_prv_str
+from bipsea.bip32types import parse_ext_key, validate_prv_str
 from bipsea.bip39 import LANGUAGES, validate_mnemonic_words
+from bipsea.bip85 import apply_85, derive, to_gpg_private_key_block
 from bipsea.bipsea import ISO_TO_LANGUAGE, N_WORDS_ALLOWED, cli, try_for_pipe_input
 from bipsea.util import ASCII_INPUTS, LOGGER_NAME
 
@@ -278,13 +279,64 @@ class TestDerive:
         assert result.exit_code == 0
         assert result.output.strip() == vector["derived_pwd"]
 
-    @pytest.mark.parametrize("app", ("wif", "xprv"))
+    @pytest.mark.parametrize("app", ("wif", "xprv", "gpg"))
     def test_num_not_allowed(self, runner, app):
         result = runner.invoke(
             cli, ["derive", "-x", MNEMONIC_12["xprv"], "--application", app, "-n", 2]
         )
         assert result.exit_code != 0
         assert "--number" in result.output
+
+    def test_gpg(self, runner):
+        xprv = MNEMONIC_12["xprv"]
+        result = runner.invoke(
+            cli,
+            [
+                "derive",
+                "-x",
+                xprv,
+                "--application",
+                "gpg",
+                "--key-type",
+                "3",
+                "--key-bits",
+                "521",
+                "--sub-key",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        output = result.output.strip()
+        expected_hex_len = 64 * 2
+        assert len(output) == expected_hex_len
+        path = "m/83696968'/828365'/3'/521'/0'/1'"
+        expected = apply_85(derive(parse_ext_key(xprv), path), path)["application"]
+        assert output == expected
+
+    def test_gpg_private_block(self, runner):
+        xprv = MNEMONIC_12["xprv"]
+        result = runner.invoke(
+            cli,
+            [
+                "derive",
+                "-x",
+                xprv,
+                "--application",
+                "gpg",
+                "--key-type",
+                "0",
+                "--key-bits",
+                "1024",
+                "--gpg-private-block",
+            ],
+        )
+        assert result.exit_code == 0
+        output = result.output.strip()
+        assert output.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
+        path = "m/83696968'/828365'/0'/1024'/0'"
+        entropy = apply_85(derive(parse_ext_key(xprv), path), path)["entropy"]
+        expected = to_gpg_private_key_block(entropy, key_type=0, key_bits=1024)
+        assert output == expected
 
     @pytest.mark.parametrize(
         "app, n", [("base64", 1), ("base85", 2), ("hex", 3), ("dice", 0)]

@@ -275,9 +275,13 @@ BIP-85 specifies a variety of application codes including the following:
 | `128169'`        | for 16 to 64 bytes of random hex |
 | `707764'`        | for 20 to 86 characters of a base64 password |
 | `707785'`        | for 10 to 80 characters of a base85 password |
+| `828365'`        | for OpenPGP key entropy across RSA, Curve25519, secp256k1, NIST, and Brainpool key types |
 
 bipsea implements all of the above applications plus the BIP-85 discrete random
 number generator (DRNG).
+
+For `--application gpg`, use `--gpg-private-block` to emit a `-----BEGIN PGP PRIVATE KEY BLOCK-----`
+text block for direct GnuPG2 import (currently for RSA `--key-type 0`).
 
 
 ### Derivation

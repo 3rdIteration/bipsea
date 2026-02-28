@@ -27,6 +27,7 @@ from bipsea.bip85 import (
     derive,
     split_and_validate,
     to_entropy,
+    to_gpg_private_key_block,
 )
 from bipsea.util import LOGGER_NAME, to_hex_string
 
@@ -239,3 +240,57 @@ def test_drng_input():
     DRNG(bytes(64))
     with pytest.raises(ValueError):
         DRNG(bytes(65))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "m/83696968'/828365'/0'/1024'/0'",
+        "m/83696968'/828365'/0'/2048'/0'",
+        "m/83696968'/828365'/0'/4096'/0'",
+        "m/83696968'/828365'/1'/256'/0'",
+        "m/83696968'/828365'/2'/256'/0'",
+        "m/83696968'/828365'/3'/256'/0'",
+        "m/83696968'/828365'/3'/384'/0'",
+        "m/83696968'/828365'/3'/521'/0'",
+        "m/83696968'/828365'/4'/256'/0'",
+        "m/83696968'/828365'/4'/384'/0'",
+        "m/83696968'/828365'/4'/512'/0'",
+        "m/83696968'/828365'/1'/256'/0'/0'",
+    ],
+)
+def test_gpg(path):
+    master = parse_ext_key(COMMON_XPRV)
+    output = apply_85(derive(master, path), path)
+    assert to_hex_string(output["entropy"]) == output["application"]
+    assert len(output["entropy"]) == 64
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "m/83696968'/828365'/5'/256'/0'",
+        "m/83696968'/828365'/1'/255'/0'",
+        "m/83696968'/828365'/2'/384'/0'",
+        "m/83696968'/828365'/3'/512'/0'",
+        "m/83696968'/828365'/4'/521'/0'",
+    ],
+)
+def test_gpg_bad(path):
+    master = parse_ext_key(COMMON_XPRV)
+    with pytest.raises(ValueError):
+        apply_85(derive(master, path), path)
+
+
+def test_gpg_private_block_rsa():
+    path = "m/83696968'/828365'/0'/1024'/0'"
+    master = parse_ext_key(COMMON_XPRV)
+    output = apply_85(derive(master, path), path)
+    block = to_gpg_private_key_block(output["entropy"], key_type=0, key_bits=1024)
+    assert block.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
+    assert block.endswith("-----END PGP PRIVATE KEY BLOCK-----")
+
+
+def test_gpg_private_block_bad_key_type():
+    with pytest.raises(NotImplementedError):
+        to_gpg_private_key_block(bytes(64), key_type=1, key_bits=256)
