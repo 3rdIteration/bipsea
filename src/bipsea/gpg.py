@@ -275,7 +275,7 @@ def derive_gpg_key(
         if (key_type, key_bits) in DRNG_REQUIRED_ECC:
             if drng_read is None:
                 raise ValueError(
-                    f"NIST P-{key_bits} requires a BIP85-DRNG"
+                    "This curve configuration requires a BIP85-DRNG"
                 )
             curve = ECC_CURVES[(key_type, key_bits)]
             raw = drng_read(curve.baselen)

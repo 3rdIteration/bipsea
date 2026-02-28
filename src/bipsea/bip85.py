@@ -170,6 +170,61 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
         raise NotImplementedError(f"Unsupported BIP-85 application {app}")
 
 
+def export_gpg_armored(
+    master: ExtendedKey,
+    key_type: int,
+    key_bits: int,
+    key_index: int,
+    uid: str = "BIP85",
+) -> str:
+    """Derive a full GPG key set (primary + 3 subkeys) and return
+    an ASCII-armored PGP PRIVATE KEY BLOCK importable by GnuPG 2.
+
+    Parameters
+    ----------
+    master : ExtendedKey
+        BIP-32 master private key.
+    key_type : int
+        GPG key type (0=RSA, 1=Curve25519, 2=secp256k1, 3=NIST, 4=Brainpool).
+    key_bits : int
+        Key size in bits.
+    key_index : int
+        BIP-85 child index.
+    uid : str
+        User ID embedded in the key (default ``"BIP85"``).
+
+    Returns
+    -------
+    str – ASCII-armored transferable secret key.
+    """
+    from .gpg import KEY_TYPE_RSA
+    from .openpgp import export_gpg_key
+
+    base = f"m/{PURPOSE_CODES['BIP-85']}/{APPLICATIONS['gpg']}"
+    privs = {}
+    rsas = {}
+
+    for sub in [None, 0, 1, 2]:
+        path = f"{base}/{key_type}'/{key_bits}'/{key_index}'"
+        if sub is not None:
+            path += f"/{sub}'"
+        derived = derive(master, path)
+        result = apply_85(derived, path)
+        privs[sub] = bytes.fromhex(result["application"])
+        if key_type == KEY_TYPE_RSA:
+            rsas[sub] = result["gpg"]["rsa"]
+
+    return export_gpg_key(
+        primary_private=privs[None],
+        subkey_privates={0: privs[0], 1: privs[1], 2: privs[2]},
+        key_type=key_type,
+        key_bits=key_bits,
+        uid=uid,
+        primary_rsa=rsas.get(None),
+        subkey_rsas=rsas if key_type == KEY_TYPE_RSA else None,
+    )
+
+
 def to_entropy(data: bytes) -> bytes:
     return hmac_sha512(key=HMAC_KEY, data=data)
 

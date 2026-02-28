@@ -25,6 +25,7 @@ from .bip85 import (
     RANGES,
     apply_85,
     derive,
+    export_gpg_armored,
     to_entropy,
 )
 from .util import (
@@ -218,7 +219,19 @@ def xprv(mnemonic, passphrase, mainnet):
     default=None,
     help="GPG sub-key role: 0=encrypt, 1=auth, 2=sign.",
 )
-def derive_cli(application, number, index, special, xprv, to, key_type, subkey):
+@click.option(
+    "--uid",
+    default="BIP85",
+    help="User ID for GPG key export (default: BIP85).",
+)
+@click.option(
+    "--gpg-export",
+    "gpg_export",
+    is_flag=True,
+    default=False,
+    help="Export GPG key as ASCII-armored PGP PRIVATE KEY BLOCK.",
+)
+def derive_cli(application, number, index, special, xprv, to, key_type, subkey, uid, gpg_export):
     if xprv:
         xprv = xprv.strip()
     else:
@@ -261,6 +274,12 @@ def derive_cli(application, number, index, special, xprv, to, key_type, subkey):
                 option_name="--key-type",
                 message="--key-type is required for `--application gpg`",
             )
+        if gpg_export:
+            output = export_gpg_armored(
+                master, key_type, number, index, uid=uid,
+            )
+            click.echo(output)
+            return
         path += f"/{key_type}'/{number}'/{index}'"
         if subkey is not None:
             path += f"/{subkey}'"
