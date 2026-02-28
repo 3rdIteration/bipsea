@@ -26,6 +26,7 @@ from .bip85 import (
     apply_85,
     derive,
     to_entropy,
+    to_gpg_private_key_block,
 )
 from .util import (
     LOGGER_NAME,
@@ -221,13 +222,28 @@ def xprv(mnemonic, passphrase, mainnet):
     help="Optional OpenPGP subkey index for `--application gpg`.",
 )
 @click.option(
+    "--gpg-private-block/--no-gpg-private-block",
+    "gpg_private_block",
+    default=False,
+    help="For `--application gpg`, emit a GnuPG2 importable private key text block (RSA key_type=0 only).",
+)
+@click.option(
     "-t",
     "--to",
     type=click.Choice(ENTROPY_TO_VALUES),
     help="Output language for `--application mnemonic`.",
 )
 def derive_cli(
-    application, number, index, special, xprv, key_type, key_bits, sub_key, to
+    application,
+    number,
+    index,
+    special,
+    xprv,
+    key_type,
+    key_bits,
+    sub_key,
+    gpg_private_block,
+    to,
 ):
     if xprv:
         xprv = xprv.strip()
@@ -286,7 +302,13 @@ def derive_cli(
         drng = DRNG(to_entropy(derived.data[1:]))
         output = to_hex_string(drng.read(number))
     else:
-        output = apply_85(derived, path)["application"]
+        application_output = apply_85(derived, path)
+        if application == "gpg" and gpg_private_block:
+            output = to_gpg_private_key_block(
+                application_output["entropy"], key_type, key_bits
+            )
+        else:
+            output = application_output["application"]
     click.echo(output)
 
 

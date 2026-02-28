@@ -280,6 +280,9 @@ BIP-85 specifies a variety of application codes including the following:
 bipsea implements all of the above applications plus the BIP-85 discrete random
 number generator (DRNG).
 
+For `--application gpg`, use `--gpg-private-block` to emit a `-----BEGIN PGP PRIVATE KEY BLOCK-----`
+text block for direct GnuPG2 import (currently for RSA `--key-type 0`).
+
 
 ### Derivation
 

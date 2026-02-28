@@ -3,6 +3,7 @@ import hashlib
 import logging
 import math
 import re
+import textwrap
 from typing import Dict, Union
 
 import base58
@@ -38,6 +39,7 @@ RANGES = {
 PURPOSE_CODES = {"BIP-85": "83696968'"}
 
 HMAC_KEY = b"bip-entropy-from-k"
+OPENPGP_GENESIS_TIMESTAMP = 1231006505
 
 GPG_KEY_TYPE_TO_BITS = {
     0: {1024, 2048, 4096},
@@ -167,6 +169,76 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
 
 def to_entropy(data: bytes) -> bytes:
     return hmac_sha512(key=HMAC_KEY, data=data)
+
+
+def to_gpg_private_key_block(entropy: bytes, key_type: int, key_bits: int) -> str:
+    if key_type != 0:
+        raise NotImplementedError(
+            f"GnuPG2 importable private key blocks are currently supported only for RSA key_type=0, got {key_type}"
+        )
+    try:
+        from Crypto.PublicKey import RSA
+    except ImportError as err:
+        raise ImportError(
+            "pycryptodome is required for RSA OpenPGP private key block output"
+        ) from err
+
+    key = RSA.generate(key_bits, randfunc=DRNG(entropy).read)
+    public_fields = (
+        b"\x04"
+        + OPENPGP_GENESIS_TIMESTAMP.to_bytes(4, "big")
+        + b"\x01"
+        + _to_mpi(key.n)
+        + _to_mpi(key.e)
+    )
+    secret_fields = (
+        _to_mpi(key.d)
+        + _to_mpi(key.p)
+        + _to_mpi(key.q)
+        + _to_mpi(pow(key.p, -1, key.q))
+    )
+    checksum = (sum(secret_fields) % 65536).to_bytes(2, "big")
+    secret_packet_body = public_fields + b"\x00" + secret_fields + checksum
+    secret_packet = _new_packet_header(5, len(secret_packet_body)) + secret_packet_body
+    return _to_armor(secret_packet, "PGP PRIVATE KEY BLOCK")
+
+
+def _to_mpi(value: int) -> bytes:
+    byte_len = max(1, (value.bit_length() + 7) // 8)
+    value_bytes = value.to_bytes(byte_len, "big")
+    return value.bit_length().to_bytes(2, "big") + value_bytes
+
+
+def _new_packet_header(tag: int, length: int) -> bytes:
+    header = bytes([0xC0 | tag])
+    if length < 192:
+        return header + bytes([length])
+    if length <= 8383:
+        length -= 192
+        return header + bytes([(length >> 8) + 192, length & 0xFF])
+    return header + bytes([255]) + length.to_bytes(4, "big")
+
+
+def _to_armor(data: bytes, title: str) -> str:
+    payload = base64.b64encode(data).decode("ascii")
+    lines = textwrap.wrap(payload, 64)
+    checksum = base64.b64encode(_crc24(data)).decode("ascii")
+    return (
+        f"-----BEGIN {title}-----\n\n"
+        + "\n".join(lines)
+        + f"\n={checksum}\n-----END {title}-----"
+    )
+
+
+def _crc24(data: bytes) -> bytes:
+    crc = 0xB704CE
+    for b in data:
+        crc ^= b << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    return (crc & 0xFFFFFF).to_bytes(3, "big")
 
 
 def derive(master: ExtendedKey, path: str, private: bool = True) -> ExtendedKey:

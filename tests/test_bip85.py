@@ -27,6 +27,7 @@ from bipsea.bip85 import (
     derive,
     split_and_validate,
     to_entropy,
+    to_gpg_private_key_block,
 )
 from bipsea.util import LOGGER_NAME, to_hex_string
 
@@ -273,6 +274,20 @@ def test_gpg_bad(path):
     master = parse_ext_key(COMMON_XPRV)
     with pytest.raises(ValueError):
         apply_85(derive(master, path), path)
+
+
+def test_gpg_private_block_rsa():
+    path = "m/83696968'/828365'/0'/1024'/0'"
+    master = parse_ext_key(COMMON_XPRV)
+    output = apply_85(derive(master, path), path)
+    block = to_gpg_private_key_block(output["entropy"], key_type=0, key_bits=1024)
+    assert block.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
+    assert block.endswith("-----END PGP PRIVATE KEY BLOCK-----")
+
+
+def test_gpg_private_block_bad_key_type():
+    with pytest.raises(NotImplementedError):
+        to_gpg_private_key_block(bytes(64), key_type=1, key_bits=256)
 
 
 def test_drng_input():
