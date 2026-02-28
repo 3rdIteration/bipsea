@@ -200,12 +200,35 @@ def xprv(mnemonic, passphrase, mainnet):
     help="Extended private master key from which all secrets are derived.",
 )
 @click.option(
+    "--key-type",
+    "key_type",
+    type=click.IntRange(0, 4),
+    default=0,
+    help="OpenPGP key type for `--application gpg`.",
+)
+@click.option(
+    "--key-bits",
+    "key_bits",
+    type=click.IntRange(min=1),
+    default=1024,
+    help="OpenPGP key bits for `--application gpg`.",
+)
+@click.option(
+    "--sub-key",
+    "sub_key",
+    type=click.IntRange(0, 2**31 - 1),
+    default=None,
+    help="Optional OpenPGP subkey index for `--application gpg`.",
+)
+@click.option(
     "-t",
     "--to",
     type=click.Choice(ENTROPY_TO_VALUES),
     help="Output language for `--application mnemonic`.",
 )
-def derive_cli(application, number, index, special, xprv, to):
+def derive_cli(
+    application, number, index, special, xprv, key_type, key_bits, sub_key, to
+):
     if xprv:
         xprv = xprv.strip()
     else:
@@ -216,10 +239,10 @@ def derive_cli(application, number, index, special, xprv, to):
         raise click.BadParameter("Bad xprv or tprv.", param_hint="--xprv (or pipe)")
 
     if number is not None:
-        if application in ("wif", "xprv"):
+        if application in ("wif", "xprv", "gpg"):
             raise click.BadOptionUsage(
                 option_name="--number",
-                message="`--number` has no effect when `--application wif|xprv`",
+                message="`--number` has no effect when `--application wif|xprv|gpg`",
             )
     else:
         number = 24
@@ -253,6 +276,10 @@ def derive_cli(application, number, index, special, xprv, to):
     elif application == "dice":
         check_range(number, application)
         path += f"/{special}'/{number}'/{index}'"
+    elif application == "gpg":
+        path += f"/{key_type}'/{key_bits}'/{index}'"
+        if sub_key is not None:
+            path += f"/{sub_key}'"
 
     derived = derive(master, path)
     if application == "drng":

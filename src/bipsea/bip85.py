@@ -21,6 +21,7 @@ APPLICATIONS = {
     "base85": "707785'",
     "dice": "89101'",
     "drng": "0'",
+    "gpg": "828365'",
     "hex": "128169'",
     "mnemonic": "39'",
     "wif": "2'",
@@ -37,6 +38,14 @@ RANGES = {
 PURPOSE_CODES = {"BIP-85": "83696968'"}
 
 HMAC_KEY = b"bip-entropy-from-k"
+
+GPG_KEY_TYPE_TO_BITS = {
+    0: {1024, 2048, 4096},
+    1: {256},
+    2: {256},
+    3: {256, 384, 521},
+    4: {256, 384, 512},
+}
 
 INDEX_TO_LANGUAGE = {
     "0'": "english",
@@ -137,6 +146,19 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
             "entropy": entropy,
             "application": do_rolls(entropy, sides, rolls, index),
         }
+    elif app == APPLICATIONS["gpg"]:
+        if len(indexes) < 3:
+            raise ValueError(
+                f"Expected path m/.../828365'/key_type'/key_bits'/index': {path}"
+            )
+        key_type, key_bits, _ = (int(s.rstrip("'")) for s in indexes[:3])
+        if key_type not in GPG_KEY_TYPE_TO_BITS:
+            raise ValueError(f"Unsupported GPG key_type: {key_type}")
+        if key_bits not in GPG_KEY_TYPE_TO_BITS[key_type]:
+            raise ValueError(
+                f"Unsupported GPG key_bits {key_bits} for key_type {key_type}"
+            )
+        return {"entropy": entropy, "application": to_hex_string(entropy)}
     else:
         raise NotImplementedError(f"Unsupported BIP-85 application {app}")
 

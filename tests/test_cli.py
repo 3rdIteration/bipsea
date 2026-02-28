@@ -278,13 +278,33 @@ class TestDerive:
         assert result.exit_code == 0
         assert result.output.strip() == vector["derived_pwd"]
 
-    @pytest.mark.parametrize("app", ("wif", "xprv"))
+    @pytest.mark.parametrize("app", ("wif", "xprv", "gpg"))
     def test_num_not_allowed(self, runner, app):
         result = runner.invoke(
             cli, ["derive", "-x", MNEMONIC_12["xprv"], "--application", app, "-n", 2]
         )
         assert result.exit_code != 0
         assert "--number" in result.output
+
+    def test_gpg(self, runner):
+        result = runner.invoke(
+            cli,
+            [
+                "derive",
+                "-x",
+                MNEMONIC_12["xprv"],
+                "--application",
+                "gpg",
+                "--key-type",
+                "3",
+                "--key-bits",
+                "521",
+                "--sub-key",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        assert len(result.output.strip()) == 128
 
     @pytest.mark.parametrize(
         "app, n", [("base64", 1), ("base85", 2), ("hex", 3), ("dice", 0)]
