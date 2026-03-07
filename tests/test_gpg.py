@@ -29,6 +29,15 @@ def test_gpg_deterministic():
     assert r1["application"] == r2["application"]
 
 
+def test_gpg_deterministic_brainpool():
+    """Same master + path → same private key (Brainpool, uses modular reduction)."""
+    master = parse_ext_key(COMMON_XPRV)
+    path = "m/83696968'/828365'/4'/256'/0'"
+    r1 = apply_85(derive(master, path), path)
+    r2 = apply_85(derive(master, path), path)
+    assert r1["application"] == r2["application"]
+
+
 def test_gpg_distinct_indexes():
     """Different key_index → different keys."""
     master = parse_ext_key(COMMON_XPRV)
@@ -164,6 +173,20 @@ def test_gpg_export_nist(kb):
     master = parse_ext_key(COMMON_XPRV)
     armored = export_gpg_armored(master, 3, kb, 0, uid="Test")
     assert "-----BEGIN PGP PRIVATE KEY BLOCK-----" in armored
+
+
+def test_gpg_export_nist_521():
+    master = parse_ext_key(COMMON_XPRV)
+    armored = export_gpg_armored(master, 3, 521, 0, uid="Test")
+    assert "-----BEGIN PGP PRIVATE KEY BLOCK-----" in armored
+
+
+@pytest.mark.parametrize("kb", [256, 384, 512])
+def test_gpg_export_brainpool(kb):
+    master = parse_ext_key(COMMON_XPRV)
+    armored = export_gpg_armored(master, 4, kb, 0, uid="Test")
+    assert armored.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
+    assert armored.strip().endswith("-----END PGP PRIVATE KEY BLOCK-----")
 
 
 @pytest.mark.slow

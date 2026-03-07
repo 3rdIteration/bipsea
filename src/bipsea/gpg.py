@@ -115,16 +115,19 @@ def derive_ecdsa_key(entropy: bytes, key_type: int, key_bits: int) -> bytes:
     For NIST P-521 (key_bits=521), *entropy* must come from a
     BIP85-DRNG read (66 bytes); all others use the 64-byte HMAC
     output directly (truncated to ``curve.baselen``).
+
+    When the raw scalar falls outside [1, order-1] it is reduced
+    modulo ``order - 1`` and incremented by one so the result is
+    always in range.  This is deterministic and only changes the
+    output for entropy that would previously have raised ValueError.
     """
     curve = ECC_CURVES[(key_type, key_bits)]
     key_len = curve.baselen
     raw = entropy[:key_len]
     scalar = int.from_bytes(raw, "big")
     if scalar == 0 or scalar >= curve.order:
-        raise ValueError(
-            "Derived ECC scalar is out of range for the curve. "
-            "Iterate to the next key index."
-        )
+        scalar = (scalar % (curve.order - 1)) + 1
+        raw = scalar.to_bytes(key_len, "big")
     SigningKey.from_string(raw, curve=curve)
     return raw
 
@@ -284,10 +287,7 @@ def derive_gpg_key(
             bit_len = curve.order.bit_length()
             scalar &= (1 << bit_len) - 1
             if scalar == 0 or scalar >= curve.order:
-                raise ValueError(
-                    "Derived ECC scalar out of range. "
-                    "Iterate to the next key index."
-                )
+                scalar = (scalar % (curve.order - 1)) + 1
             raw = scalar.to_bytes(curve.baselen, "big")
             result["private_key"] = raw
         else:
