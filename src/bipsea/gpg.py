@@ -153,8 +153,8 @@ def generate_rsa_key(
     """Generate an RSA key deterministically from *randfunc*.
 
     Uses PyCryptodome's ``RSA.generate`` which implements FIPS 186-4
-    compliant random Miller-Rabin witnesses (§C.3.1), matching the
-    BIP85 spec's reference implementation.
+    compliant random Miller-Rabin witnesses (FIPS 186-4 §C.3.1),
+    matching the BIP85 spec's reference implementation.
 
     Returns a dict with integer components: n, e, d, p, q, dp, dq, qi.
     """

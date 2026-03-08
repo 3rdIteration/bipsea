@@ -184,8 +184,7 @@ def test_ed25519_cryptography_validation():
     ],
 )
 def test_ecdsa_cryptography_validation(kt, kb):
-    """Validate ECDSA key by comparing public key coordinates with
-    python-cryptography derivation."""
+    """Validate ECDSA public key coordinates match between ecdsa and cryptography."""
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives.asymmetric import ec
 
