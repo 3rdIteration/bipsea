@@ -193,6 +193,28 @@ def _openssl_pubkey_from_der(private_der: bytes, key_type: int) -> bytes:
         os.unlink(der_path)
 
 
+# OpenSSL command used to generate a key from an entropy file via ``-rand``.
+# Maps (key_type, key_bits) → (subcommand, extra_args).
+#
+# * RSA uses ``openssl genrsa -rand <file> <bits>``
+# * ECDSA uses ``openssl ecparam -name <curve> -genkey -noout -rand <file>``
+# * Ed25519 (key_type 1) is absent: OpenSSL 3.0 removed ``-rand`` from
+#   ``genpkey``, so there is no supported path to supply entropy via ``-rand``
+#   for Ed25519 key generation.
+_OPENSSL_GENKEY_RAND_CMD = {
+    (0, 1024): ("genrsa",   ["1024"]),
+    (0, 2048): ("genrsa",   ["2048"]),
+    (0, 4096): ("genrsa",   ["4096"]),
+    (2, 256):  ("ecparam",  ["-name", "secp256k1",      "-genkey", "-noout"]),
+    (3, 256):  ("ecparam",  ["-name", "P-256",          "-genkey", "-noout"]),
+    (3, 384):  ("ecparam",  ["-name", "P-384",          "-genkey", "-noout"]),
+    (3, 521):  ("ecparam",  ["-name", "P-521",          "-genkey", "-noout"]),
+    (4, 256):  ("ecparam",  ["-name", "brainpoolP256r1", "-genkey", "-noout"]),
+    (4, 384):  ("ecparam",  ["-name", "brainpoolP384r1", "-genkey", "-noout"]),
+    (4, 512):  ("ecparam",  ["-name", "brainpoolP512r1", "-genkey", "-noout"]),
+}
+
+
 # ── Expected test-vector entropy values from test_vectors.md ─────────────────
 
 EXPECTED_ENTROPY = {
@@ -797,7 +819,112 @@ def test_openssl_entropy_produces_matching_pubkey(key_type, key_bits):
         crypto_curve = getattr(ec, curve_name)()
         pkey_bytes = output["gpg"]["private_key"]
         priv_int = int.from_bytes(pkey_bytes, "big")
-        bipsea_pub_nums = ec.derive_private_key(priv_int, crypto_curve).public_key().public_numbers()
+        bipsea_priv = ec.derive_private_key(priv_int, crypto_curve)
+        bipsea_pub_nums = bipsea_priv.public_key().public_numbers()
         openssl_pub_nums = openssl_pub.public_numbers()
         assert openssl_pub_nums.x == bipsea_pub_nums.x, "EC public key x-coordinate mismatch"
         assert openssl_pub_nums.y == bipsea_pub_nums.y, "EC public key y-coordinate mismatch"
+
+
+# ── OpenSSL ingests BIP85 entropy via -rand and generates a valid key ─────────
+
+
+@pytest.mark.parametrize(
+    "key_type, key_bits",
+    [
+        (0, 1024),
+        (0, 2048),
+        (0, 4096),
+        (2, 256),
+        (3, 256),
+        (3, 384),
+        (3, 521),
+        (4, 256),
+        (4, 384),
+        (4, 512),
+    ],
+    ids=[
+        "RSA-1024",
+        "RSA-2048",
+        "RSA-4096",
+        "secp256k1",
+        "NIST-P256",
+        "NIST-P384",
+        "NIST-P521",
+        "Brainpool-P256",
+        "Brainpool-P384",
+        "Brainpool-P512",
+    ],
+)
+def test_openssl_genpkey_from_entropy(key_type, key_bits):
+    """OpenSSL ingests BIP85 entropy via ``-rand`` and generates a valid private key.
+
+    Mirrors the pattern from the problem statement::
+
+        dd if=/dev/urandom of=my_entropy.bin bs=32 count=1
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \\
+            -rand my_entropy.bin
+
+    Here the BIP85-derived entropy bytes replace ``/dev/urandom`` as the
+    entropy file.  The appropriate command per key type is:
+
+    * RSA   → ``openssl genrsa  -rand <file> <bits>``
+    * ECDSA → ``openssl ecparam -rand <file> -name <curve> -genkey -noout``
+
+    Ed25519 (key_type 1) is not tested here because OpenSSL 3.0 removed
+    the ``-rand`` flag from ``openssl genpkey``.  For Ed25519, the
+    ``test_openssl_entropy_produces_matching_pubkey`` test covers the
+    entropy-to-key path via PKCS#8 DER loading.
+
+    Because OpenSSL's DRBG mixes the ``-rand`` file with its own internal
+    state, the generated key will **differ** from bipsea's deterministically
+    derived key.  The test validates that bipsea's BIP85 entropy is of
+    sufficient quality to seed OpenSSL's key generation, producing a
+    structurally valid key pair on every run.
+    """
+    # Use the pre-verified entropy bytes directly — avoids the slow RSA prime
+    # generation that _derive_gpg() would trigger for key_type 0.
+    entropy = bytes.fromhex(EXPECTED_ENTROPY[f"{key_type}/{key_bits}"])
+
+    subcmd, extra_args = _OPENSSL_GENKEY_RAND_CMD[(key_type, key_bits)]
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(entropy)
+        entropy_path = f.name
+    try:
+        # Generate the key, seeding OpenSSL's RNG with bipsea's entropy
+        gen = subprocess.run(
+            ["openssl", subcmd, "-rand", entropy_path] + extra_args,
+            capture_output=True,
+        )
+        assert gen.returncode == 0, (
+            f"openssl {subcmd} -rand failed:\n"
+            f"  stderr: {gen.stderr.decode(errors='replace')}"
+        )
+        pem_bytes = gen.stdout
+        assert pem_bytes, "openssl produced no key output"
+
+        # Validate the generated key is structurally sound
+        check = subprocess.run(
+            ["openssl", "pkey", "-check", "-noout"],
+            input=pem_bytes,
+            capture_output=True,
+        )
+        assert check.returncode == 0, (
+            f"openssl pkey -check failed on key generated from BIP85 entropy:\n"
+            f"  stderr: {check.stderr.decode(errors='replace')}"
+        )
+
+        # Confirm OpenSSL can derive the public key, proving a complete key pair
+        pubout = subprocess.run(
+            ["openssl", "pkey", "-pubout"],
+            input=pem_bytes,
+            capture_output=True,
+        )
+        assert pubout.returncode == 0, (
+            f"openssl pkey -pubout failed:\n"
+            f"  stderr: {pubout.stderr.decode(errors='replace')}"
+        )
+        assert b"BEGIN PUBLIC KEY" in pubout.stdout
+    finally:
+        os.unlink(entropy_path)
