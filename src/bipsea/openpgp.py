@@ -463,7 +463,7 @@ def _do_sign(
         s = int.from_bytes(sig[32:], "big")
         return encode_mpi(r) + encode_mpi(s)
     elif algo == ALGO_ECDSA:
-        sig = signing_key.sign_digest(digest)
+        sig = signing_key.sign_digest_deterministic(digest)
         half = len(sig) // 2
         r = int.from_bytes(sig[:half], "big")
         s = int.from_bytes(sig[half:], "big")
