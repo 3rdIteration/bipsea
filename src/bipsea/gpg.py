@@ -16,8 +16,9 @@ Derivation path:
     sub_key 2' = SIGNATURE
 """
 
-import math
 from typing import Callable, Dict, Tuple
+
+from Crypto.PublicKey import RSA
 
 from ecdsa import (
     BRAINPOOLP256r1,
@@ -143,55 +144,7 @@ def derive_curve25519_key(entropy: bytes, sub_key: int = None) -> bytes:
     return derive_ed25519_key(entropy)
 
 
-# ── RSA key generation (pure Python) ────────────────────────────────────────
-
-
-def _is_prime(n: int, trials: int = 32) -> bool:
-    """Miller-Rabin probabilistic primality test."""
-    if n < 2:
-        return False
-    # small primes
-    small = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53)
-    for p in small:
-        if n == p:
-            return True
-        if n % p == 0:
-            return False
-
-    # write n-1 as 2^r · d
-    r, d = 0, n - 1
-    while d & 1 == 0:
-        r += 1
-        d >>= 1
-
-    # deterministic + fixed witnesses (sufficient for all sizes we care about)
-    witnesses = small
-    for a in witnesses[:trials]:
-        if a >= n - 1:
-            continue
-        x = pow(a, d, n)
-        if x == 1 or x == n - 1:
-            continue
-        for _ in range(r - 1):
-            x = pow(x, 2, n)
-            if x == n - 1:
-                break
-        else:
-            return False
-    return True
-
-
-def _generate_prime(bits: int, randfunc: Callable[[int], bytes]) -> int:
-    """Generate a probable prime of exactly *bits* bit-length."""
-    byte_len = (bits + 7) // 8
-    mask = (1 << bits) - 1
-    while True:
-        raw = randfunc(byte_len)
-        candidate = int.from_bytes(raw, "big")
-        candidate &= mask  # trim to exact bit width
-        candidate |= (1 << (bits - 1)) | 1  # set MSB and LSB
-        if _is_prime(candidate):
-            return candidate
+# ── RSA key generation (PyCryptodome, FIPS 186-4 compliant) ─────────────────
 
 
 def generate_rsa_key(
@@ -199,33 +152,23 @@ def generate_rsa_key(
 ) -> Dict[str, int]:
     """Generate an RSA key deterministically from *randfunc*.
 
+    Uses PyCryptodome's ``RSA.generate`` which implements FIPS 186-4
+    compliant random Miller-Rabin witnesses (§C.3.1), matching the
+    BIP85 spec's reference implementation.
+
     Returns a dict with integer components: n, e, d, p, q, dp, dq, qi.
     """
-    e = 65537
-    half = key_bits // 2
-    while True:
-        p = _generate_prime(half, randfunc)
-        q = _generate_prime(half, randfunc)
-        if p == q:
-            continue
-        n = p * q
-        if n.bit_length() != key_bits:
-            continue
-        lcm_pq = (p - 1) * (q - 1) // math.gcd(p - 1, q - 1)
-        if math.gcd(e, lcm_pq) != 1:
-            continue
-        d = pow(e, -1, lcm_pq)
-        break
-
-    # canonical form: p > q
-    if p < q:
-        p, q = q, p
-
-    dp = d % (p - 1)
-    dq = d % (q - 1)
-    qi = pow(q, -1, p)
-
-    return {"n": n, "e": e, "d": d, "p": p, "q": q, "dp": dp, "dq": dq, "qi": qi}
+    rsa = RSA.generate(key_bits, randfunc=randfunc)
+    return {
+        "n": rsa.n,
+        "e": rsa.e,
+        "d": rsa.d,
+        "p": rsa.p,
+        "q": rsa.q,
+        "dp": rsa.d % (rsa.p - 1),
+        "dq": rsa.d % (rsa.q - 1),
+        "qi": pow(rsa.q, -1, rsa.p),
+    }
 
 
 # ── GPG key derivation entry point ──────────────────────────────────────────
