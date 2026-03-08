@@ -10,6 +10,7 @@ from data.bip85_vectors import (
     COMMON_XPRV,
     DICE,
     EXT_KEY_TO_ENTROPY,
+    GPG_ECC,
     HEX,
     PWD_BASE64,
     PWD_BASE85,
@@ -25,6 +26,7 @@ from bipsea.bip85 import (
     INDEX_TO_LANGUAGE,
     apply_85,
     derive,
+    entropy_to_ecc_key,
     split_and_validate,
     to_entropy,
     to_gpg_private_key_block,
@@ -294,3 +296,46 @@ def test_gpg_private_block_rsa():
 def test_gpg_private_block_bad_key_type():
     with pytest.raises(NotImplementedError):
         to_gpg_private_key_block(bytes(64), key_type=1, key_bits=256)
+
+
+@pytest.mark.parametrize(
+    "vector",
+    GPG_ECC,
+    ids=[f"gpg_ecc-type{v['key_type']}-{v['key_bits']}bit" for v in GPG_ECC],
+)
+def test_gpg_ecc_openssl(vector):
+    """Verify the BIP-85 entropy→ECC key step matches OpenSSL output.
+
+    For each GPG ECC key type and bit-size, the BIP-85 entropy is fed into
+    OpenSSL (via the ``cryptography`` library) and the resulting public key must
+    match the precomputed test vector.  This confirms that bipsea's
+    ``entropy_to_ecc_key`` implementation is compatible with OpenSSL.
+    """
+    master = parse_ext_key(vector["master"])
+    path = vector["path"]
+    output = apply_85(derive(master, path), path)
+    entropy = output["entropy"]
+
+    # Entropy must match the vector (sanity check on BIP-85 derivation)
+    assert to_hex_string(entropy) == vector["derived_entropy"]
+
+    priv_bytes, pub_bytes = entropy_to_ecc_key(entropy, vector["key_type"], vector["key_bits"])
+
+    assert priv_bytes.hex() == vector["private_key"], (
+        f"Private key mismatch for type {vector['key_type']} {vector['key_bits']}-bit"
+    )
+    assert pub_bytes.hex() == vector["public_key"], (
+        f"Public key mismatch for type {vector['key_type']} {vector['key_bits']}-bit "
+        f"(OpenSSL cross-check failed)"
+    )
+
+
+def test_gpg_ecc_zero_scalar_rejected():
+    """entropy that reduces to zero mod the curve order must be rejected."""
+    from bipsea.bip85 import _CURVE_ORDER
+
+    # Craft entropy whose first key_bytes equal the P-256 order (n mod n == 0)
+    p256_n = _CURVE_ORDER[(3, 256)]
+    bad_entropy = p256_n.to_bytes(32, "big") + bytes(32)
+    with pytest.raises(ValueError, match="zero"):
+        entropy_to_ecc_key(bad_entropy, key_type=3, key_bits=256)

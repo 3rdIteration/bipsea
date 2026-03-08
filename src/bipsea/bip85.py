@@ -203,6 +203,100 @@ def to_gpg_private_key_block(entropy: bytes, key_type: int, key_bits: int) -> st
     return _to_armor(secret_packet, "PGP PRIVATE KEY BLOCK")
 
 
+# Curve orders for ECDSA key derivation from entropy (scalar = entropy mod n)
+# Source: NIST FIPS 186-4 (P-256, P-384, P-521) and RFC 5639 (Brainpool)
+_CURVE_ORDER = {
+    (3, 256): 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551,
+    (3, 384): 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB248B0A77AECEC196ACCC52973,
+    (3, 521): 0x01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA51868783BF2F966B7FCC0148F709A5D03BB5C9B8899C47AEBB6FB71E91386409,
+    (4, 256): 0xA9FB57DBA1EEA9BC3E660A909D838D718C397AA3B561A6F7901E0E82974856A7,
+    (4, 384): 0x8CB91E82A3386D280F5D6F7E50E641DF152F7109ED5456B31F166E6CAC0425A7CF3AB6AF6B7FC3103B883202E9046565,
+    (4, 512): 0xAADD9DB8DBE9C48B3FD4E6AE33C9FC07CB308DB3B3C9D20ED6639CCA70330870553E5C414CA92619418661197FAC10471DB1D381085DDADDB58796829CA90069,
+}
+
+
+def entropy_to_ecc_key(entropy: bytes, key_type: int, key_bits: int):
+    """Convert BIP-85 entropy to an ECC private key using OpenSSL (via the cryptography library).
+
+    Implements the entropy→key step for OpenPGP ECC key types 1–4.  The same
+    deterministic transformation is performed by OpenSSL when a raw private-key
+    seed is loaded with ``EVP_PKEY_new_raw_private_key`` (types 1 and 2) or
+    ``derive_private_key`` (types 3 and 4).
+
+    Key-type mapping (mirrors OpenPGP algorithm IDs):
+      1 – Ed25519  (EdDSA, 256-bit): ``entropy[:32]`` is the 32-byte seed.
+      2 – X25519   (ECDH,  256-bit): ``entropy[:32]`` is the raw scalar.
+      3 – NIST ECDSA (P-256/384/521): ``entropy[:ceil(bits/8)]`` reduced mod n.
+      4 – Brainpool  (256/384/512-bit): ``entropy[:ceil(bits/8)]`` reduced mod n.
+
+    Args:
+        entropy: 64-byte BIP-85 entropy (output of :func:`to_entropy`).
+        key_type: OpenPGP key-type index (1–4).
+        key_bits: Key size in bits; must be valid for *key_type*.
+
+    Returns:
+        A 2-tuple ``(private_key_bytes, public_key_bytes)`` where
+        *private_key_bytes* is the raw private scalar/seed and
+        *public_key_bytes* is the compressed public key (or 32-byte raw point
+        for Ed25519/X25519).
+
+    Raises:
+        ImportError: If the ``cryptography`` package is not installed.
+        ValueError: If *key_type* or *key_bits* are unsupported.
+    """
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            PublicFormat,
+        )
+    except ImportError as err:
+        raise ImportError(
+            "the 'cryptography' package is required for ECC key derivation"
+        ) from err
+
+    if key_type not in GPG_KEY_TYPE_TO_BITS:
+        raise ValueError(f"Unsupported key_type: {key_type}")
+    if key_bits not in GPG_KEY_TYPE_TO_BITS[key_type]:
+        raise ValueError(f"Unsupported key_bits {key_bits} for key_type {key_type}")
+
+    key_bytes = (key_bits + 7) // 8
+    priv_bytes = entropy[:key_bytes]
+
+    if key_type == 1:
+        priv_key = Ed25519PrivateKey.from_private_bytes(priv_bytes)
+        pub_bytes = priv_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return priv_bytes, pub_bytes
+
+    if key_type == 2:
+        priv_key = X25519PrivateKey.from_private_bytes(priv_bytes)
+        pub_bytes = priv_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return priv_bytes, pub_bytes
+
+    # Types 3 (NIST) and 4 (Brainpool): private key = entropy mod curve order
+    curve_map = {
+        (3, 256): ec.SECP256R1(),
+        (3, 384): ec.SECP384R1(),
+        (3, 521): ec.SECP521R1(),
+        (4, 256): ec.BrainpoolP256R1(),
+        (4, 384): ec.BrainpoolP384R1(),
+        (4, 512): ec.BrainpoolP512R1(),
+    }
+    curve = curve_map[(key_type, key_bits)]
+    n = _CURVE_ORDER[(key_type, key_bits)]
+    scalar = int.from_bytes(priv_bytes, "big") % n
+    if scalar == 0:
+        raise ValueError("Derived scalar is zero; entropy is unusable for this curve")
+    priv_key = ec.derive_private_key(scalar, curve)
+    priv_bytes_out = scalar.to_bytes(key_bytes, "big")
+    pub_bytes = priv_key.public_key().public_bytes(
+        Encoding.X962, PublicFormat.CompressedPoint
+    )
+    return priv_bytes_out, pub_bytes
+
+
 def _to_mpi(value: int) -> bytes:
     byte_len = max(1, (value.bit_length() + 7) // 8)
     value_bytes = value.to_bytes(byte_len, "big")
