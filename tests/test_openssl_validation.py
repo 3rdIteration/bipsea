@@ -99,7 +99,42 @@ def _derive_gpg(path: str) -> dict:
     return apply_85(derive(master, path), path)
 
 
-def _openssl_validate_der(der_bytes: bytes, cmd: list[str]) -> None:
+def _openssl_cmd_for_gpg_key(key_type: int) -> list:
+    """Return the appropriate OpenSSL validation command for a GPG key type.
+
+    * key_type 0 (RSA)        → ``openssl rsa -check``
+    * key_type 1 (Curve25519) → ``openssl pkey`` (Ed25519 primary key)
+    * key_type 2-4 (ECDSA)    → ``openssl ec -check``
+    """
+    if key_type == 0:
+        return ["openssl", "rsa", "-inform", "DER", "-check", "-noout", "-in"]
+    elif key_type == 1:
+        return ["openssl", "pkey", "-inform", "DER", "-noout", "-text", "-in"]
+    else:
+        return ["openssl", "ec", "-inform", "DER", "-check", "-noout", "-in"]
+
+
+def _gpg_key_to_der(output: dict, key_type: int, key_bits: int) -> bytes:
+    """Convert GPG primary-key material (from BIP85 output) to DER format.
+
+    The DER encoding differs per key type:
+    * RSA        → PKCS#1 RSAPrivateKey
+    * Curve25519 → PKCS#8 Ed25519 (primary key is always Ed25519)
+    * ECDSA      → SEC 1 EC private-key structure (via ``ecdsa`` library)
+    """
+    if key_type == 0:
+        rsa = output["gpg"]["rsa"]
+        return _rsa_private_der({"version": 0, **rsa})
+    elif key_type == 1:
+        seed = output["gpg"]["private_key"]
+        return _pkcs8_ed25519_der(seed)
+    else:
+        curve = _ECC_CURVES[(key_type, key_bits)]
+        sk = SigningKey.from_string(output["gpg"]["private_key"], curve=curve)
+        return sk.to_der()
+
+
+def _openssl_validate_der(der_bytes: bytes, cmd: list) -> None:
     """Write DER to a temp file, run OpenSSL, assert success."""
     with tempfile.NamedTemporaryFile(suffix=".der", delete=False) as f:
         f.write(der_bytes)
@@ -555,3 +590,77 @@ def test_armored_key_starts_ends(key_type, key_bits):
     )
     assert armored.strip().startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
     assert armored.strip().endswith("-----END PGP PRIVATE KEY BLOCK-----")
+
+
+# ── Unified entropy → OpenSSL key check → fingerprint ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "key_type, key_bits",
+    [
+        (0, 1024),
+        (0, 2048),
+        (0, 4096),
+        (1, 256),
+        (2, 256),
+        (3, 256),
+        (3, 384),
+        (3, 521),
+        (4, 256),
+        (4, 384),
+        (4, 512),
+    ],
+    ids=[
+        "RSA-1024",
+        "RSA-2048",
+        "RSA-4096",
+        "Curve25519",
+        "secp256k1",
+        "NIST-P256",
+        "NIST-P384",
+        "NIST-P521",
+        "Brainpool-P256",
+        "Brainpool-P384",
+        "Brainpool-P512",
+    ],
+)
+def test_openssl_entropy_to_fingerprint(key_type, key_bits):
+    """Validate entropy → OpenSSL key check → GPG fingerprint for every GPG key type.
+
+    For each GPG key type the appropriate OpenSSL command is selected:
+    * RSA        → ``openssl rsa -check``
+    * Curve25519 → ``openssl pkey``  (primary key is Ed25519)
+    * ECDSA      → ``openssl ec -check``
+
+    The test then re-derives the public key body, computes the OpenPGP v4
+    fingerprint (SHA-1), and asserts it matches the expected value from
+    test_vectors.md, giving end-to-end coverage of the entropy-to-fingerprint
+    pipeline with an independent OpenSSL structural check along the way.
+    """
+    from bipsea.gpg import KEY_TYPE_RSA
+    from bipsea.openpgp import _build_ecc_key_body, _build_rsa_key_body, key_fingerprint_v4
+
+    path = f"m/83696968'/828365'/{key_type}'/{key_bits}'/0'"
+    output = _derive_gpg(path)
+
+    # 1. Entropy must match test_vectors.md
+    assert output["entropy"].hex() == EXPECTED_ENTROPY[f"{key_type}/{key_bits}"]
+
+    # 2. Validate the derived key with the OpenSSL command for this key type
+    der = _gpg_key_to_der(output, key_type, key_bits)
+    _openssl_validate_der(der, _openssl_cmd_for_gpg_key(key_type))
+
+    # 3. Compute the OpenPGP v4 fingerprint from the already-derived output
+    #    and verify it against the expected value in test_vectors.md
+    primary_priv = bytes.fromhex(output["application"])
+
+    if key_type == KEY_TYPE_RSA:
+        _, pub_body, _ = _build_rsa_key_body(output["gpg"]["rsa"])
+    else:
+        _, pub_body, _ = _build_ecc_key_body(
+            primary_priv, key_type, key_bits, is_encrypt=False
+        )
+
+    fp_hex = key_fingerprint_v4(pub_body).hex().upper()
+    expected = EXPECTED_FINGERPRINTS[f"{key_type}/{key_bits}"]
+    assert fp_hex == expected, f"Fingerprint mismatch: got {fp_hex}, expected {expected}"
