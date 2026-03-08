@@ -39,14 +39,6 @@ COMMON_XPRV = (
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _openssl(*args: str, stdin: bytes = b"") -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["openssl", *args],
-        input=stdin,
-        capture_output=True,
-    )
-
-
 def _der_tlv(tag: int, payload: bytes) -> bytes:
     """Wrap *payload* in a DER TLV."""
     length = len(payload)
@@ -332,6 +324,120 @@ def test_ecdsa_openssl(key_type, key_bits):
         der,
         ["openssl", "ec", "-inform", "DER", "-check", "-noout", "-in"],
     )
+
+
+# ── python-cryptography validation (ECDSA + Ed25519/X25519) ─────────────────
+
+# (key_type, key_bits) → python-cryptography curve + hash
+_CRYPTO_ECC = {
+    (2, 256): ("SECP256K1", "SHA256"),
+    (3, 256): ("SECP256R1", "SHA256"),
+    (3, 384): ("SECP384R1", "SHA384"),
+    (3, 521): ("SECP521R1", "SHA512"),
+    (4, 256): ("BrainpoolP256R1", "SHA256"),
+    (4, 384): ("BrainpoolP384R1", "SHA384"),
+    (4, 512): ("BrainpoolP512R1", "SHA512"),
+}
+
+
+@pytest.mark.parametrize(
+    "key_type, key_bits",
+    [
+        (2, 256),
+        (3, 256),
+        (3, 384),
+        (3, 521),
+        (4, 256),
+        (4, 384),
+        (4, 512),
+    ],
+    ids=[
+        "secp256k1",
+        "NIST-P256",
+        "NIST-P384",
+        "NIST-P521",
+        "Brainpool-P256",
+        "Brainpool-P384",
+        "Brainpool-P512",
+    ],
+)
+def test_ecdsa_python_cryptography(key_type, key_bits):
+    """Validate ECDSA key material against python-cryptography.
+
+    Reconstructs the key from the raw private scalar, verifies the
+    public-key point matches what the ``ecdsa`` library computes,
+    and performs a sign/verify round-trip.
+    """
+    import cryptography.hazmat.primitives.asymmetric.ec as ec
+    from cryptography.hazmat.primitives import hashes as crypto_hashes
+
+    curve_name, hash_name = _CRYPTO_ECC[(key_type, key_bits)]
+    crypto_curve = getattr(ec, curve_name)()
+    hash_algo = getattr(crypto_hashes, hash_name)()
+
+    path = f"m/83696968'/828365'/{key_type}'/{key_bits}'/0'"
+    output = _derive_gpg(path)
+
+    assert output["entropy"].hex() == EXPECTED_ENTROPY[f"{key_type}/{key_bits}"]
+
+    pkey_bytes = output["gpg"]["private_key"]
+    priv_int = int.from_bytes(pkey_bytes, "big")
+
+    # Reconstruct via python-cryptography – raises on invalid scalar
+    private_key = ec.derive_private_key(priv_int, crypto_curve)
+    assert private_key.key_size == crypto_curve.key_size
+
+    # Cross-check: public key matches ecdsa library
+    ecdsa_curve = _ECC_CURVES[(key_type, key_bits)]
+    sk = SigningKey.from_string(pkey_bytes, curve=ecdsa_curve)
+    ecdsa_pub = sk.verifying_key.to_string()
+
+    pub_nums = private_key.public_key().public_numbers()
+    byte_len = (key_bits + 7) // 8
+    crypto_pub = (
+        pub_nums.x.to_bytes(byte_len, "big")
+        + pub_nums.y.to_bytes(byte_len, "big")
+    )
+    assert ecdsa_pub == crypto_pub
+
+    # Sign / verify round-trip
+    message = b"BIP85 GPG test vector validation"
+    signature = private_key.sign(message, ec.ECDSA(hash_algo))
+    private_key.public_key().verify(signature, message, ec.ECDSA(hash_algo))
+
+
+def test_ed25519_python_cryptography():
+    """Validate Ed25519 primary key against python-cryptography."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    path = "m/83696968'/828365'/1'/256'/0'"
+    output = _derive_gpg(path)
+    assert output["entropy"].hex() == EXPECTED_ENTROPY["1/256"]
+
+    seed = output["gpg"]["private_key"]
+    assert len(seed) == 32
+
+    private_key = Ed25519PrivateKey.from_private_bytes(seed)
+
+    # Sign / verify round-trip
+    message = b"BIP85 GPG test vector validation"
+    signature = private_key.sign(message)
+    private_key.public_key().verify(signature, message)
+
+
+def test_x25519_python_cryptography():
+    """Validate X25519 encryption subkey against python-cryptography."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    path = "m/83696968'/828365'/1'/256'/0'/0'"
+    output = _derive_gpg(path)
+
+    seed = output["gpg"]["private_key"]
+    assert len(seed) == 32
+
+    # Loads successfully – X25519 is key exchange, not signing
+    private_key = X25519PrivateKey.from_private_bytes(seed)
+    assert private_key.public_key() is not None
 
 
 # ── Fingerprint validation ──────────────────────────────────────────────────
