@@ -226,11 +226,11 @@ def derive_gpg_key(
             curve = ECC_CURVES[(key_type, key_bits)]
             raw = drng_read(curve.baselen)
             scalar = int.from_bytes(raw, "big")
-            # Mask to the exact bit length of the curve order
-            bit_len = curve.order.bit_length()
-            scalar &= (1 << bit_len) - 1
-            if scalar == 0 or scalar >= curve.order:
-                scalar = (scalar % (curve.order - 1)) + 1
+            # Reduce modulo order (no bit masking – the full entropy
+            # participates so the output matches PyCryptodome / SeedSigner).
+            scalar = scalar % curve.order
+            if scalar == 0:
+                scalar = 1  # astronomically unlikely
             raw = scalar.to_bytes(curve.baselen, "big")
             result["private_key"] = raw
         else:
