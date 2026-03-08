@@ -122,11 +122,11 @@ Application code: `828365'`.
 
 ### Key Type 0 — RSA
 
-| Key Bits | Path | Entropy (hex) |
-|----------|------|---------------|
-| 1024 | `m/83696968'/828365'/0'/1024'/0'` | `2b9380df43421f46b5c38e13ea80612ff53488bc5d272e86d493ee1eecf738bb7b50e4978b7352f95772f1211483b0e6bba86c544a946b10d76ed493b8c2e01f` |
-| 2048 | `m/83696968'/828365'/0'/2048'/0'` | `98c4fb6d76f203e8828bdfd28416edca7a83a9b203901f7ad31f056cda8b3c25b19e5fd2aa642ca0abb9ed8bebf3d141af6c76b28a19eba624bdc6f8a76ce138` |
-| 4096 | `m/83696968'/828365'/0'/4096'/0'` | `2d2ef3335dc51e7a0642bfe86fba0bb4e8401b703d8d679bb1a31d75f8a81f1fd52b20b2eae50ef6e0378b8755f4f0426c68b54f11edc0c848e017e81bb2ad87` |
+| Key Bits | Path | Entropy (hex) | Fingerprint |
+|----------|------|---------------|-------------|
+| 1024 | `m/83696968'/828365'/0'/1024'/0'` | `2b9380df43421f46b5c38e13ea80612ff53488bc5d272e86d493ee1eecf738bb7b50e4978b7352f95772f1211483b0e6bba86c544a946b10d76ed493b8c2e01f` | `E3D7 994A 22E4 9299 6E24 C770 5319 212C 3BEE 4C88` |
+| 2048 | `m/83696968'/828365'/0'/2048'/0'` | `98c4fb6d76f203e8828bdfd28416edca7a83a9b203901f7ad31f056cda8b3c25b19e5fd2aa642ca0abb9ed8bebf3d141af6c76b28a19eba624bdc6f8a76ce138` | `9987 9DF6 D21E 34C8 A086 A4BD 8B44 8E5B C298 294A` |
+| 4096 | `m/83696968'/828365'/0'/4096'/0'` | `2d2ef3335dc51e7a0642bfe86fba0bb4e8401b703d8d679bb1a31d75f8a81f1fd52b20b2eae50ef6e0378b8755f4f0426c68b54f11edc0c848e017e81bb2ad87` | `5ABD 668A 33DA 720F 3F58 3F2D E2DB 9EFB CBAC 4B2C` |
 
 #### ASCII-Armored Private Key Blocks
 
@@ -498,9 +498,9 @@ cNw=
 
 ### Key Type 1 — Curve25519
 
-| Key Bits | Path | Entropy (hex) |
-|----------|------|---------------|
-| 256 | `m/83696968'/828365'/1'/256'/0'` | `0e90b553528cd97a033c282f54cf72c1020adaec205d5c0e57e9f2556d06fea683618e4be8f91e7e059647f9d6373eb8b5f535e7ba4097cfb3e93c4957843614` |
+| Key Bits | Path | Entropy (hex) | Fingerprint |
+|----------|------|---------------|-------------|
+| 256 | `m/83696968'/828365'/1'/256'/0'` | `0e90b553528cd97a033c282f54cf72c1020adaec205d5c0e57e9f2556d06fea683618e4be8f91e7e059647f9d6373eb8b5f535e7ba4097cfb3e93c4957843614` | `E81D F237 1408 2AD2 747E 732B 9A24 C95B D8C2 A55E` |
 
 #### ASCII-Armored Private Key Block
 
@@ -534,9 +534,9 @@ rnmLusNrWYEqvNtMAP45yHhLbekgIRW+djr1NXqymH9oNtYHugy7PqaHu+EcBw==
 
 ### Key Type 2 — secp256k1
 
-| Key Bits | Path | Entropy (hex) |
-|----------|------|---------------|
-| 256 | `m/83696968'/828365'/2'/256'/0'` | `f3bb8b3d6b81fbd202c34b59ce7e97c83969e9b5733b936de16c51119c7a48239ddf66729ef5e4df97ea39471f05a89f070869b3f9d72d69f3ae8bd7ee4fb6b3` |
+| Key Bits | Path | Entropy (hex) | Fingerprint |
+|----------|------|---------------|-------------|
+| 256 | `m/83696968'/828365'/2'/256'/0'` | `f3bb8b3d6b81fbd202c34b59ce7e97c83969e9b5733b936de16c51119c7a48239ddf66729ef5e4df97ea39471f05a89f070869b3f9d72d69f3ae8bd7ee4fb6b3` | `6D99 D348 74C6 E88F F30C 758A 46F7 E1AF 05FC 3414` |
 
 #### ASCII-Armored Private Key Block
 
@@ -572,11 +572,11 @@ vAZIzOeivzdVAP0cacG/CUzSkRcSNLvuLvfMYnHzMaIoarcuRNORsMrwug==
 
 ### Key Type 3 — NIST (P-256, P-384, P-521)
 
-| Key Bits | Path | Entropy (hex) |
-|----------|------|---------------|
-| 256 | `m/83696968'/828365'/3'/256'/0'` | `f52586f58521916b9f28b0058be86effcde82e571eabada9e3f63c6f67752ff12a4d3bf2fffe0f147164945691605a58f28f6bded869c38b3db9f0e577d83728` |
-| 384 | `m/83696968'/828365'/3'/384'/0'` | `830005ea400f7a03c27aa06a9728fe311c9a48dc31bd417f07b96c69edc73d25baa00d04b9dbbe6f42539b06d9ef1ba62ed73d4a3a992302aae09e17e0d9f42f` |
-| 521 | `m/83696968'/828365'/3'/521'/0'` | `3524b3cbe60eb78a156dae44674702f69381afe5292d6d15d7801b7e530f2a0616b7b876c0ba85d6e675587fdc0ce2242ad00252493ec9c3a024217d1e2aa954` |
+| Key Bits | Path | Entropy (hex) | Fingerprint |
+|----------|------|---------------|-------------|
+| 256 | `m/83696968'/828365'/3'/256'/0'` | `f52586f58521916b9f28b0058be86effcde82e571eabada9e3f63c6f67752ff12a4d3bf2fffe0f147164945691605a58f28f6bded869c38b3db9f0e577d83728` | `2FE6 D862 FF2A BF1C 1FAA 2753 B681 BEF5 B5D5 74C4` |
+| 384 | `m/83696968'/828365'/3'/384'/0'` | `830005ea400f7a03c27aa06a9728fe311c9a48dc31bd417f07b96c69edc73d25baa00d04b9dbbe6f42539b06d9ef1ba62ed73d4a3a992302aae09e17e0d9f42f` | `5668 7C3C 9072 19B2 9FCE 39CF 95F0 16F9 B150 B8A1` |
+| 521 | `m/83696968'/828365'/3'/521'/0'` | `3524b3cbe60eb78a156dae44674702f69381afe5292d6d15d7801b7e530f2a0616b7b876c0ba85d6e675587fdc0ce2242ad00252493ec9c3a024217d1e2aa954` | `EE26 13AE C231 FD42 ECB6 264E F0D6 7F7D 7541 0C0B` |
 
 #### ASCII-Armored Private Key Blocks
 
@@ -693,11 +693,11 @@ NjvoiA4aBXHrDXLaBZApVnCxONbzUcDzP89HjtRljeOeC0obFNf0P0UPKcq4/QIJAcuhIufqVzOx
 
 ### Key Type 4 — Brainpool (P-256, P-384, P-512)
 
-| Key Bits | Path | Entropy (hex) |
-|----------|------|---------------|
-| 256 | `m/83696968'/828365'/4'/256'/0'` | `97ee4490d89bf257e9a038e2af12824fba47fec721970ca1fc1c094650d2716d75491402530776ba31d215fac6c2de0cb6661f1d380b682e20246bf962cdf385` |
-| 384 | `m/83696968'/828365'/4'/384'/0'` | `3fa833db4195fbd7a9c4e3f6fdb65ffb8951c5c65ca0cce441a4410e11aa96fcb094ed8c1fb5317448ae098ca9cae2c351b513e47d1b74e4c80c1facdf7b0a5a` |
-| 512 | `m/83696968'/828365'/4'/512'/0'` | `985f0131503109fc7fb2ab15e6a86846888e4b9a9f4f11f0d7b30dba4570cf8cc728a4c8ce9bbeb9b9819fbe924bb2d6d71a9c8332635cfb5db5008364f3a43a` |
+| Key Bits | Path | Entropy (hex) | Fingerprint |
+|----------|------|---------------|-------------|
+| 256 | `m/83696968'/828365'/4'/256'/0'` | `97ee4490d89bf257e9a038e2af12824fba47fec721970ca1fc1c094650d2716d75491402530776ba31d215fac6c2de0cb6661f1d380b682e20246bf962cdf385` | `6161 7C06 F6F2 AC32 3D67 782F 11CB 4B79 FEFD 4369` |
+| 384 | `m/83696968'/828365'/4'/384'/0'` | `3fa833db4195fbd7a9c4e3f6fdb65ffb8951c5c65ca0cce441a4410e11aa96fcb094ed8c1fb5317448ae098ca9cae2c351b513e47d1b74e4c80c1facdf7b0a5a` | `3278 6624 D0CA 7D7F 0133 0940 397F 2F1F A2BE 47CB` |
+| 512 | `m/83696968'/828365'/4'/512'/0'` | `985f0131503109fc7fb2ab15e6a86846888e4b9a9f4f11f0d7b30dba4570cf8cc728a4c8ce9bbeb9b9819fbe924bb2d6d71a9c8332635cfb5db5008364f3a43a` | `99D7 BDC9 37AC 6E9B CC17 D093 6643 E050 1D03 C680` |
 
 #### ASCII-Armored Private Key Blocks
 
