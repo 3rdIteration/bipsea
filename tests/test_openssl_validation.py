@@ -153,6 +153,46 @@ def _openssl_validate_der(der_bytes: bytes, cmd: list) -> None:
         os.unlink(der_path)
 
 
+def _openssl_pubkey_from_der(private_der: bytes, key_type: int) -> bytes:
+    """Ask OpenSSL to derive the public key (SPKI DER) from a private key DER.
+
+    OpenSSL ingests the entropy-encoded private key and *produces* the
+    corresponding public key.  The subcommand depends on the DER format:
+
+    * RSA  (PKCS#1 RSAPrivateKey)   → ``openssl rsa  -pubout``
+    * Ed25519 (PKCS#8)              → ``openssl pkey -pubout``
+    * ECDSA (SEC 1 ECPrivateKey)    → ``openssl ec   -pubout``
+
+    Returns raw SPKI DER bytes of the public key.
+    """
+    if key_type == 0:
+        subcmd = "rsa"
+    elif key_type == 1:
+        subcmd = "pkey"
+    else:
+        subcmd = "ec"
+
+    with tempfile.NamedTemporaryFile(suffix=".der", delete=False) as f:
+        f.write(private_der)
+        der_path = f.name
+    try:
+        result = subprocess.run(
+            [
+                "openssl", subcmd,
+                "-in", der_path, "-inform", "DER",
+                "-pubout", "-outform", "DER",
+            ],
+            capture_output=True,
+        )
+        assert result.returncode == 0, (
+            f"OpenSSL {subcmd} -pubout failed:\n"
+            f"  stderr: {result.stderr.decode(errors='replace')}"
+        )
+        return result.stdout
+    finally:
+        os.unlink(der_path)
+
+
 # ── Expected test-vector entropy values from test_vectors.md ─────────────────
 
 EXPECTED_ENTROPY = {
@@ -664,3 +704,100 @@ def test_openssl_entropy_to_fingerprint(key_type, key_bits):
     fp_hex = key_fingerprint_v4(pub_body).hex().upper()
     expected = EXPECTED_FINGERPRINTS[f"{key_type}/{key_bits}"]
     assert fp_hex == expected, f"Fingerprint mismatch: got {fp_hex}, expected {expected}"
+
+
+# ── OpenSSL produces matching public key from entropy-encoded private key ─────
+
+
+@pytest.mark.parametrize(
+    "key_type, key_bits",
+    [
+        (0, 1024),
+        (0, 2048),
+        (0, 4096),
+        (1, 256),
+        (2, 256),
+        (3, 256),
+        (3, 384),
+        (3, 521),
+        (4, 256),
+        (4, 384),
+        (4, 512),
+    ],
+    ids=[
+        "RSA-1024",
+        "RSA-2048",
+        "RSA-4096",
+        "Curve25519",
+        "secp256k1",
+        "NIST-P256",
+        "NIST-P384",
+        "NIST-P521",
+        "Brainpool-P256",
+        "Brainpool-P384",
+        "Brainpool-P512",
+    ],
+)
+def test_openssl_entropy_produces_matching_pubkey(key_type, key_bits):
+    """OpenSSL ingests the BIP85-derived entropy and produces a matching public key.
+
+    For each GPG key type, this test:
+    1. Derives the BIP85 private key from entropy.
+    2. Encodes it as the appropriate DER format and hands it to OpenSSL with
+       ``-pubout``, so OpenSSL *produces* the corresponding public key.
+    3. Independently computes the expected public key from the same entropy
+       using python-cryptography.
+    4. Asserts the two public keys are identical, proving end-to-end
+       consistency between bipsea's entropy-to-key derivation and OpenSSL.
+
+    The OpenSSL subcommand differs per key type:
+    * RSA        → ``openssl rsa  -pubout``  (PKCS#1 private key DER)
+    * Curve25519 → ``openssl pkey -pubout``  (PKCS#8 Ed25519)
+    * ECDSA      → ``openssl ec   -pubout``  (SEC 1 ECPrivateKey DER)
+    """
+    import cryptography.hazmat.primitives.asymmetric.ec as ec
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        PublicFormat,
+        load_der_public_key,
+    )
+
+    path = f"m/83696968'/828365'/{key_type}'/{key_bits}'/0'"
+    output = _derive_gpg(path)
+
+    # Entropy must match test_vectors.md
+    assert output["entropy"].hex() == EXPECTED_ENTROPY[f"{key_type}/{key_bits}"]
+
+    # Have OpenSSL ingest the DER private key and produce the public key
+    priv_der = _gpg_key_to_der(output, key_type, key_bits)
+    openssl_pub_spki = _openssl_pubkey_from_der(priv_der, key_type)
+    openssl_pub = load_der_public_key(openssl_pub_spki)
+
+    # Compare OpenSSL's produced public key to bipsea's independently computed one
+    if key_type == 0:  # RSA
+        rsa = output["gpg"]["rsa"]
+        openssl_nums = openssl_pub.public_numbers()
+        assert openssl_nums.n == rsa["n"], "RSA modulus mismatch"
+        assert openssl_nums.e == rsa["e"], "RSA public exponent mismatch"
+
+    elif key_type == 1:  # Curve25519 / Ed25519 primary key
+        seed = output["gpg"]["private_key"]
+        bipsea_pub_bytes = (
+            Ed25519PrivateKey.from_private_bytes(seed)
+            .public_key()
+            .public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+        openssl_pub_bytes = openssl_pub.public_bytes(Encoding.Raw, PublicFormat.Raw)
+        assert openssl_pub_bytes == bipsea_pub_bytes, "Ed25519 public key mismatch"
+
+    else:  # ECDSA (secp256k1, NIST, Brainpool)
+        curve_name, _ = _CRYPTO_ECC[(key_type, key_bits)]
+        crypto_curve = getattr(ec, curve_name)()
+        pkey_bytes = output["gpg"]["private_key"]
+        priv_int = int.from_bytes(pkey_bytes, "big")
+        bipsea_pub_nums = ec.derive_private_key(priv_int, crypto_curve).public_key().public_numbers()
+        openssl_pub_nums = openssl_pub.public_numbers()
+        assert openssl_pub_nums.x == bipsea_pub_nums.x, "EC public key x-coordinate mismatch"
+        assert openssl_pub_nums.y == bipsea_pub_nums.y, "EC public key y-coordinate mismatch"
