@@ -3,7 +3,6 @@ import hashlib
 import logging
 import math
 import re
-import textwrap
 from typing import Dict, Union
 
 import base58
@@ -12,6 +11,7 @@ from .bip32 import VERSIONS, ExtendedKey
 from .bip32 import derive_key as derive_key_bip32
 from .bip32 import hmac_sha512
 from .bip39 import LANGUAGES, N_WORDS_META, entropy_to_words, validate_mnemonic_words
+from .gpg import VALID_KEY_BITS, VALID_KEY_TYPES, derive_gpg_key
 from .util import LOGGER_NAME, to_hex_string
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -39,16 +39,6 @@ RANGES = {
 PURPOSE_CODES = {"BIP-85": "83696968'"}
 
 HMAC_KEY = b"bip-entropy-from-k"
-# Bitcoin genesis block timestamp (2009-01-03 18:15:05 UTC), used by BIP85 OpenPGP guidance.
-OPENPGP_GENESIS_TIMESTAMP = 1231006505
-
-GPG_KEY_TYPE_TO_BITS = {
-    0: {1024, 2048, 4096},
-    1: {256},
-    2: {256},
-    3: {256, 384, 521},
-    4: {256, 384, 512},
-}
 
 INDEX_TO_LANGUAGE = {
     "0'": "english",
@@ -150,20 +140,32 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
             "application": do_rolls(entropy, sides, rolls, index),
         }
     elif app == APPLICATIONS["gpg"]:
-        if len(indexes) < 3:
-            raise ValueError(
-                f"Expected key_type', key_bits', and index' after 828365': {path}"
-            )
-        key_type, key_bits, index = (int(s.rstrip("'")) for s in indexes[:3])
-        if index < 0:
-            raise ValueError(f"Unsupported GPG key index: {index}")
-        if key_type not in GPG_KEY_TYPE_TO_BITS:
-            raise ValueError(f"Unsupported GPG key_type: {key_type}")
-        if key_bits not in GPG_KEY_TYPE_TO_BITS[key_type]:
-            raise ValueError(
-                f"Unsupported GPG key_bits {key_bits} for key_type {key_type}"
-            )
-        return {"entropy": entropy, "application": to_hex_string(entropy)}
+        key_type = int(indexes[0].rstrip("'"))
+        key_bits = int(indexes[1].rstrip("'"))
+        # sub_key is present when len(indexes) >= 4 (path has 7 segments)
+        sub_key = int(indexes[3].rstrip("'")) if len(indexes) >= 4 else None
+
+        from .gpg import DRNG_REQUIRED_ECC, KEY_TYPE_RSA
+
+        use_drng = (
+            key_type == KEY_TYPE_RSA
+            or (key_type, key_bits) in DRNG_REQUIRED_ECC
+        )
+        drng_read = DRNG(entropy).read if use_drng else None
+
+        result = derive_gpg_key(
+            entropy=entropy,
+            key_type=key_type,
+            key_bits=key_bits,
+            drng_read=drng_read,
+            sub_key=sub_key,
+        )
+
+        return {
+            "entropy": entropy,
+            "application": to_hex_string(result["private_key"]),
+            "gpg": result,
+        }
     else:
         raise NotImplementedError(f"Unsupported BIP-85 application {app}")
 
@@ -172,73 +174,59 @@ def to_entropy(data: bytes) -> bytes:
     return hmac_sha512(key=HMAC_KEY, data=data)
 
 
-def to_gpg_private_key_block(entropy: bytes, key_type: int, key_bits: int) -> str:
-    if key_type != 0:
-        raise NotImplementedError(
-            f"GnuPG2 importable private key blocks are currently supported only for RSA key_type=0, got {key_type}"
-        )
-    try:
-        from Crypto.PublicKey import RSA
-    except ImportError as err:
-        raise ImportError(
-            "pycryptodome is required for RSA OpenPGP private key block output"
-        ) from err
+def export_gpg_armored(
+    master: ExtendedKey,
+    key_type: int,
+    key_bits: int,
+    key_index: int,
+    uid: str = "BIP85",
+) -> str:
+    """Derive a full GPG key set (primary + 3 subkeys) and return
+    an ASCII-armored PGP PRIVATE KEY BLOCK importable by GnuPG 2.
 
-    key = RSA.generate(key_bits, randfunc=DRNG(entropy).read)
-    public_fields = (
-        b"\x04"
-        + OPENPGP_GENESIS_TIMESTAMP.to_bytes(4, "big")
-        + b"\x01"
-        + _to_mpi(key.n)
-        + _to_mpi(key.e)
+    Parameters
+    ----------
+    master : ExtendedKey
+        BIP-32 master private key.
+    key_type : int
+        GPG key type (0=RSA, 1=Curve25519, 2=secp256k1, 3=NIST, 4=Brainpool).
+    key_bits : int
+        Key size in bits.
+    key_index : int
+        BIP-85 child index.
+    uid : str
+        User ID embedded in the key (default ``"BIP85"``).
+
+    Returns
+    -------
+    str – ASCII-armored transferable secret key.
+    """
+    from .gpg import KEY_TYPE_RSA
+    from .openpgp import export_gpg_key
+
+    base = f"m/{PURPOSE_CODES['BIP-85']}/{APPLICATIONS['gpg']}"
+    privs = {}
+    rsas = {}
+
+    for sub in [None, 0, 1, 2]:
+        path = f"{base}/{key_type}'/{key_bits}'/{key_index}'"
+        if sub is not None:
+            path += f"/{sub}'"
+        derived = derive(master, path)
+        result = apply_85(derived, path)
+        privs[sub] = bytes.fromhex(result["application"])
+        if key_type == KEY_TYPE_RSA:
+            rsas[sub] = result["gpg"]["rsa"]
+
+    return export_gpg_key(
+        primary_private=privs[None],
+        subkey_privates={0: privs[0], 1: privs[1], 2: privs[2]},
+        key_type=key_type,
+        key_bits=key_bits,
+        uid=uid,
+        primary_rsa=rsas.get(None),
+        subkey_rsas=rsas if key_type == KEY_TYPE_RSA else None,
     )
-    try:
-        u = pow(key.p, -1, key.q)
-    except ValueError as err:
-        raise ValueError("Failed to compute RSA CRT coefficient p^-1 mod q") from err
-    secret_fields = _to_mpi(key.d) + _to_mpi(key.p) + _to_mpi(key.q) + _to_mpi(u)
-    checksum = (sum(secret_fields) % 65536).to_bytes(2, "big")
-    secret_packet_body = public_fields + b"\x00" + secret_fields + checksum
-    secret_packet = _new_packet_header(5, len(secret_packet_body)) + secret_packet_body
-    return _to_armor(secret_packet, "PGP PRIVATE KEY BLOCK")
-
-
-def _to_mpi(value: int) -> bytes:
-    byte_len = max(1, (value.bit_length() + 7) // 8)
-    value_bytes = value.to_bytes(byte_len, "big")
-    return value.bit_length().to_bytes(2, "big") + value_bytes
-
-
-def _new_packet_header(tag: int, length: int) -> bytes:
-    header = bytes([0xC0 | tag])
-    if length < 192:
-        return header + bytes([length])
-    if length <= 8383:
-        length -= 192
-        return header + bytes([(length >> 8) + 192, length & 0xFF])
-    return header + bytes([255]) + length.to_bytes(4, "big")
-
-
-def _to_armor(data: bytes, title: str) -> str:
-    payload = base64.b64encode(data).decode("ascii")
-    lines = textwrap.wrap(payload, 64)
-    checksum = base64.b64encode(_crc24(data)).decode("ascii")
-    return (
-        f"-----BEGIN {title}-----\n\n"
-        + "\n".join(lines)
-        + f"\n={checksum}\n-----END {title}-----"
-    )
-
-
-def _crc24(data: bytes) -> bytes:
-    crc = 0xB704CE
-    for b in data:
-        crc ^= b << 16
-        for _ in range(8):
-            crc <<= 1
-            if crc & 0x1000000:
-                crc ^= 0x1864CFB
-    return (crc & 0xFFFFFF).to_bytes(3, "big")
 
 
 def derive(master: ExtendedKey, path: str, private: bool = True) -> ExtendedKey:

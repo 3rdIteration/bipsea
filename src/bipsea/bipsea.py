@@ -25,8 +25,8 @@ from .bip85 import (
     RANGES,
     apply_85,
     derive,
+    export_gpg_armored,
     to_entropy,
-    to_gpg_private_key_block,
 )
 from .util import (
     LOGGER_NAME,
@@ -225,7 +225,7 @@ def xprv(mnemonic, passphrase, mainnet):
     "--gpg-private-block/--no-gpg-private-block",
     "gpg_private_block",
     default=False,
-    help="For `--application gpg`, emit a GnuPG2 importable private key text block (RSA key_type=0 only).",
+    help="For `--application gpg`, emit a GnuPG2 importable ASCII-armored private key block.",
 )
 @click.option(
     "-t",
@@ -293,6 +293,12 @@ def derive_cli(
         check_range(number, application)
         path += f"/{special}'/{number}'/{index}'"
     elif application == "gpg":
+        if gpg_private_block:
+            output = export_gpg_armored(
+                master, key_type, key_bits, index,
+            )
+            click.echo(output)
+            return
         path += f"/{key_type}'/{key_bits}'/{index}'"
         if sub_key is not None:
             path += f"/{sub_key}'"
@@ -303,12 +309,7 @@ def derive_cli(
         output = to_hex_string(drng.read(number))
     else:
         application_output = apply_85(derived, path)
-        if application == "gpg" and gpg_private_block:
-            output = to_gpg_private_key_block(
-                application_output["entropy"], key_type, key_bits
-            )
-        else:
-            output = application_output["application"]
+        output = application_output["application"]
     click.echo(output)
 
 
