@@ -36,6 +36,37 @@ pip install bipsea
 ```
 
 
+## Running from source (without installation)
+
+Clone the repository and install dependencies:
+
+```sh
+git clone https://github.com/akarve/bipsea.git
+cd bipsea
+poetry install
+```
+
+Then run bipsea via Poetry:
+
+```sh
+poetry run bipsea --help
+```
+
+Or equivalently, with `python -m`:
+
+```sh
+poetry run python -m bipsea.bipsea --help
+```
+
+> If you prefer not to use Poetry, you can install the dependencies and run
+> directly with pip:
+>
+> ```sh
+> pip install -e .
+> python -m bipsea.bipsea --help
+> ```
+
+
 ## Help
 
 ```sh
