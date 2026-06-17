@@ -175,10 +175,10 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
         )
 
         ECC_KT_MAP = {
-            0: KEY_TYPE_CURVE25519,
-            1: KEY_TYPE_SECP256K1,
-            2: KEY_TYPE_NIST,
-            3: KEY_TYPE_BRAINPOOL,
+            0: KEY_TYPE_BRAINPOOL,
+            1: KEY_TYPE_CURVE25519,
+            2: KEY_TYPE_SECP256K1,
+            3: KEY_TYPE_NIST,
         }
 
         key_type_disp = int(indexes[0].rstrip("'"))
