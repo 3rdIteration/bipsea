@@ -243,6 +243,7 @@ _ECDH_KDF = {
 _SIG_HASH = {
     (0, 1024): HASH_SHA256,
     (0, 2048): HASH_SHA256,
+    (0, 3072): HASH_SHA256,
     (0, 4096): HASH_SHA256,
     (1, 256): HASH_SHA256,
     (2, 256): HASH_SHA256,

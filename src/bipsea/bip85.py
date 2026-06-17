@@ -23,6 +23,7 @@ APPLICATIONS = {
     "dice": "89101'",
     "drng": "0'",
     "gpg": "828365'",
+    "ecc_gpg": "828366'",
     "hex": "128169'",
     "mnemonic": "39'",
     "wif": "2'",
@@ -156,6 +157,45 @@ def apply_85(derived_key: ExtendedKey, path: str) -> Dict[str, Union[bytes, str]
         result = derive_gpg_key(
             entropy=entropy,
             key_type=key_type,
+            key_bits=key_bits,
+            drng_read=drng_read,
+            sub_key=sub_key,
+        )
+
+        return {
+            "entropy": entropy,
+            "application": to_hex_string(result["private_key"]),
+            "gpg": result,
+        }
+    elif app == APPLICATIONS["ecc_gpg"]:
+        # ECC GPG (app 828366') uses key_type 0-3, remapped to internal types
+        from .gpg import (
+            KEY_TYPE_CURVE25519, KEY_TYPE_SECP256K1,
+            KEY_TYPE_NIST, KEY_TYPE_BRAINPOOL, DRNG_REQUIRED_ECC,
+        )
+
+        ECC_KT_MAP = {
+            0: KEY_TYPE_BRAINPOOL,
+            1: KEY_TYPE_CURVE25519,
+            2: KEY_TYPE_SECP256K1,
+            3: KEY_TYPE_NIST,
+        }
+
+        key_type_disp = int(indexes[0].rstrip("'"))
+        key_bits = int(indexes[1].rstrip("'"))
+        sub_key = int(indexes[3].rstrip("'")) if len(indexes) >= 4 else None
+
+        if key_type_disp not in ECC_KT_MAP:
+            raise ValueError(f"Invalid ECC GPG key_type: {key_type_disp}")
+
+        internal_kt = ECC_KT_MAP[key_type_disp]
+
+        use_drng = (internal_kt, key_bits) in DRNG_REQUIRED_ECC
+        drng_read = DRNG(entropy).read if use_drng else None
+
+        result = derive_gpg_key(
+            entropy=entropy,
+            key_type=internal_kt,
             key_bits=key_bits,
             drng_read=drng_read,
             sub_key=sub_key,
